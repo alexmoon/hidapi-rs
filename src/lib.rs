@@ -75,7 +75,7 @@ impl HidApiLock {
                 Ok(HidApiLock)
             }
         } else {
-            Err(HidError::InitializationError)
+            Ok(HidApiLock)
         }
     }
 }

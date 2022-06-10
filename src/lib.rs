@@ -48,6 +48,7 @@ use std::ffi::CStr;
 use std::ffi::CString;
 use std::fmt;
 use std::mem::ManuallyDrop;
+use std::sync::atomic::AtomicU32;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -63,15 +64,12 @@ struct HidApiLock;
 
 impl HidApiLock {
     fn acquire() -> HidResult<HidApiLock> {
-        const EXPECTED_CURRENT: bool = false;
-
-        if EXPECTED_CURRENT
-            == HID_API_LOCK.compare_and_swap(EXPECTED_CURRENT, true, Ordering::SeqCst)
-        {
+        // WARNING: Race condition if hid_init() fails!
+        if 0 == HID_API_LOCK.fetch_add(1, Ordering::SeqCst) {
             // Initialize the HID and prevent other HIDs from being created
             unsafe {
                 if ffi::hid_init() == -1 {
-                    HID_API_LOCK.store(false, Ordering::SeqCst);
+                    HID_API_LOCK.fetch_sub(1, Ordering::SeqCst);
                     return Err(HidError::InitializationError);
                 }
                 Ok(HidApiLock)
@@ -84,10 +82,11 @@ impl HidApiLock {
 
 impl Drop for HidApiLock {
     fn drop(&mut self) {
-        unsafe {
-            ffi::hid_exit();
+        if 1 == HID_API_LOCK.fetch_sub(1, Ordering::SeqCst) {
+            unsafe {
+                ffi::hid_exit();
+            }
         }
-        HID_API_LOCK.store(false, Ordering::SeqCst);
     }
 }
 
@@ -99,7 +98,7 @@ pub struct HidApi {
     _lock: Arc<HidApiLock>,
 }
 
-static HID_API_LOCK: AtomicBool = AtomicBool::new(false);
+static HID_API_LOCK: AtomicU32 = AtomicU32::new(0);
 
 impl HidApi {
     /// Initializes the hidapi.

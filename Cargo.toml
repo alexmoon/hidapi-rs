@@ -15,6 +15,7 @@ keywords = ["hid", "api", "usb","binding", "wrapper"]
 build = "build.rs"
 links = "hidapi"
 documentation = "https://docs.rs/hidapi"
+edition = "2021"
 
 [features]
 default = ["linux-static-libusb", "illumos-static-libusb"]
@@ -27,6 +28,7 @@ illumos-shared-libusb = []
 
 [dependencies]
 libc = "0.2"
+once_cell = "1.12.0"
 
 [build-dependencies]
 cc = "1.0"

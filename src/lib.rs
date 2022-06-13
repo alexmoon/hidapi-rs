@@ -44,6 +44,7 @@ mod error;
 mod ffi;
 
 use libc::{c_int, size_t, wchar_t};
+use once_cell::sync::Lazy;
 use std::ffi::CStr;
 use std::ffi::CString;
 use std::fmt;
@@ -51,6 +52,7 @@ use std::mem::ManuallyDrop;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex;
 
 pub use error::HidError;
 
@@ -64,29 +66,29 @@ struct HidApiLock;
 
 impl HidApiLock {
     fn acquire() -> HidResult<HidApiLock> {
-        // WARNING: Race condition if hid_init() fails!
-        if 0 == HID_API_LOCK.fetch_add(1, Ordering::SeqCst) {
+        let mut guard = HID_API_LOCK.lock().unwrap();
+        if *guard == 0 {
             // Initialize the HID and prevent other HIDs from being created
             unsafe {
                 if ffi::hid_init() == -1 {
-                    HID_API_LOCK.fetch_sub(1, Ordering::SeqCst);
                     return Err(HidError::InitializationError);
                 }
-                Ok(HidApiLock)
             }
-        } else {
-            Ok(HidApiLock)
         }
+        *guard += 1;
+        Ok(HidApiLock)
     }
 }
 
 impl Drop for HidApiLock {
     fn drop(&mut self) {
-        if 1 == HID_API_LOCK.fetch_sub(1, Ordering::SeqCst) {
+        let mut guard = HID_API_LOCK.lock().unwrap();
+        if *guard == 1 {
             unsafe {
                 ffi::hid_exit();
             }
         }
+        *guard -= 1;
     }
 }
 
@@ -98,7 +100,7 @@ pub struct HidApi {
     _lock: Arc<HidApiLock>,
 }
 
-static HID_API_LOCK: AtomicU32 = AtomicU32::new(0);
+static HID_API_LOCK: Lazy<Mutex<u32>> = Lazy::new(|| Mutex::new(0));
 
 impl HidApi {
     /// Initializes the hidapi.
